@@ -4,6 +4,10 @@ Three years of the AI frontier, told through **247 weekly [LMArena / Chatbot Are
 
 This project cleans that history, reconstructs each weekly leaderboard, and answers eleven questions about how the race actually unfolded.
 
+### 📊 [**→ Open the live interactive dashboard**](https://hashtro9-rgb.github.io/ai-model-arena-analysis/)
+
+A no-scroll, tabbed dashboard (The Race · Competitive Structure · Rating Quality) with hover tooltips, toggleable series, and a region filter — built with Chart.js.
+
 > **Reading Elo:** higher is better. A ~35-point gap ≈ the stronger model wins the head-to-head about 55% of the time. Each rating has a 95% confidence interval — if two models' intervals overlap, they're a statistical tie.
 
 ---

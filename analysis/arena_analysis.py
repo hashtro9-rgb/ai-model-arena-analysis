@@ -18,6 +18,7 @@ Data source: LMArena / Chatbot Arena
 from __future__ import annotations
 
 import os
+import json
 import warnings
 from itertools import cycle
 
@@ -698,6 +699,113 @@ ax.grid(axis="y", visible=False)
 _finish(fig, ax, "11_style_control_effect.png",
         "Who was gaming style? Rank shifts when answer formatting is neutralised",
         f"Text vs style-controlled rank, snapshot {scd.date()}")
+
+# ---------------------------------------------------------------------------
+# Dump aggregated series to JSON for the interactive dashboard (index.html).
+# This keeps the dashboard fully reproducible: re-running this script refreshes
+# analysis/dashboard_data.json, and build_dashboard.py inlines it into the HTML.
+# ---------------------------------------------------------------------------
+hr("DUMP dashboard_data.json")
+
+master_dates = [pd.Timestamp(d).strftime("%Y-%m-%d")
+                for d in sorted(text["date"].unique())]
+midx = pd.to_datetime(master_dates)
+
+
+def _aligned(series_by_date, ndigits=1):
+    """Reindex a date-indexed Series onto the master date axis; NaN -> None."""
+    s = series_by_date.reindex(midx)
+    return [None if pd.isna(v) else round(float(v), ndigits) for v in s.values]
+
+
+# Org trajectories (best model Elo per lab per snapshot)
+traj = {}
+for org in TRAJ_ORGS:
+    sub = best_org[best_org["org_key"] == org].set_index("date")["rating"]
+    traj[DISPLAY.get(org, org)] = _aligned(sub)
+
+# Frontier level + top-10 gap
+f_idx = front.set_index("date")
+frontier = {"top1": _aligned(f_idx["top1"]),
+            "top10": _aligned(f_idx["top10"]),
+            "gap": _aligned(f_idx["gap"])}
+
+# Open-weight vs proprietary frontier
+o_idx = opdf.set_index("date")
+openprop = {"open": _aligned(o_idx["open"]), "prop": _aligned(o_idx["prop"])}
+
+# China vs US/West frontier
+g_idx = geodf.set_index("date")
+chinaus = {"china": _aligned(g_idx["China"]), "us": _aligned(g_idx["US / West"])}
+
+# Top-10 license mix (share -> %)
+m_idx = mixdf.set_index("date")
+licensemix = {"open": _aligned(m_idx["open"] * 100, 1),
+              "prop": _aligned(m_idx["proprietary"] * 100, 1)}
+
+# Model reign bars (top 12 by snapshots at #1)
+reign = [{"model": r["model_name"], "org": r["org_display"],
+          "snapshots": int(r["snapshots"])}
+         for _, r in model_total.head(12).iterrows()]
+
+# Votes vs precision scatter (sample to keep the file light) + median-by-bin line
+_samp = prec.sample(min(900, len(prec)), random_state=42)
+scatter = [[int(v), round(float(w), 1)]
+           for v, w in zip(_samp["vote_count"], _samp["ci_width"])]
+scatter_median = [[int(c), round(float(mm), 1)]
+                  for c, mm in zip(centers[:len(med)], med.values)]
+
+# Latest-snapshot confidence-interval bars (top 15) — visualises overlap
+_ci = (text[text["date"] == latest_date]
+       .dropna(subset=["rating_lower", "rating_upper"])
+       .sort_values("rank").head(15))
+ci_bars = [{"model": r["model_name"], "org": r["org_display"],
+            "low": round(float(r["rating_lower"]), 1),
+            "high": round(float(r["rating_upper"]), 1),
+            "rating": round(float(r["rating"]), 1)}
+           for _, r in _ci.iterrows()]
+
+# Headline KPIs (exact, from the data)
+top_row = text[text["date"] == latest_date].sort_values("rank").iloc[0]
+n_overlap = len(overlaps)
+dashboard = {
+    "meta": {
+        "snapshots": int(df["date"].nunique()),        # 247 across all subsets
+        "text_snapshots": int(text["date"].nunique()),  # 223 on the text board
+        "rows": int(n_before),                          # raw row count (~97k)
+        "date_min": master_dates[0],
+        "date_max": master_dates[-1],
+        "latest": latest_date.strftime("%Y-%m-%d"),
+    },
+    "kpis": {
+        "top_model": top_row["model_name"],
+        "top_org": top_row["org_display"],
+        "top_rating": int(round(float(top_row["rating"]))),
+        "longest_reign_weeks": int(reigns_df["weeks"].max()),
+        "gap_1_10": int(round(float(front.iloc[-1]["gap"]))),
+        "open_gap": int(round(float(opv.iloc[-1]["gap"]))),
+        "china_gap": int(round(float(gv.iloc[-1]["gap"]))),
+        "top10_compression_pct": int(round(
+            (1 - front.iloc[-1]["gap"] / front["gap"].max()) * 100)),
+        "overlap_pairs": n_overlap,
+        "overlap_total": len(lr) - 1,
+    },
+    "dates": master_dates,
+    "trajectories": traj,
+    "frontier": frontier,
+    "openprop": openprop,
+    "chinaus": chinaus,
+    "licensemix": licensemix,
+    "reign": reign,
+    "scatter": scatter,
+    "scatter_median": scatter_median,
+    "ci_bars": ci_bars,
+}
+
+with open(os.path.join("analysis", "dashboard_data.json"), "w", encoding="utf-8") as _jf:
+    json.dump(dashboard, _jf, ensure_ascii=False, separators=(",", ":"))
+print(f"    wrote analysis/dashboard_data.json "
+      f"({len(master_dates)} dates, {len(traj)} trajectory series)")
 
 # ---------------------------------------------------------------------------
 # Emit the human-readable findings writeup (analysis/FINDINGS.md)
